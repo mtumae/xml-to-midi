@@ -1,0 +1,17 @@
+# for conversion
+music21
+midi2audio
+pretty_midi
+numpy
+opencv-python
+moviepy
+
+
+
+
+# for server
+fastapi[standard]
+sqlmodel
+celery
+boto3
+psycopg2
