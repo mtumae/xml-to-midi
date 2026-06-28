@@ -1,0 +1,227 @@
+<!doctype html>
+<html lang="en">
+    <head>
+        <meta charset="UTF-8" />
+        <title>Processor</title>
+        <!--<link rel="stylesheet" href="/static/style.css" />-->
+    </head>
+    <body>
+        <div id="app"></div>
+        <script type="module">
+            // Import Preact and htm directly from an enterprise CDN
+            import { h, render } from "https://esm.sh/preact";
+            import htm from "https://esm.sh/htm";
+            import { useState } from "https://esm.sh/preact/hooks";
+            // Initialize the JSX-like compiler template engine
+            const html = htm.bind(h);
+            // Your clean, component-based Preact state engine
+
+            export const handleFileChange = async (e) => {
+                const file = e.target.files[0];
+                if (!file) return;
+
+                console.log(
+                    `Processing file: ${file.name} with size ${file.size} bytes.`,
+                );
+
+                const fileText = await file.text();
+                const chunkBlobs = chunkAndTagFile(fileText);
+                const totalChunks = chunkBlobs.length;
+                console.log(
+                    `Initialized batch. Sliced file into: ${totalChunks} chunk(s).`,
+                );
+
+                // let initData;
+                // try {
+                //     const initResponse = await fetch("/api/upload/init", {
+                //         method: "POST",
+                //         headers: { "Content-Type": "application/json" },
+                //         body: JSON.stringify({
+                //             file_name: file.name,
+                //             total_chunks: totalChunks,
+                //         }),
+                //     });
+
+                //     if (!initResponse.ok)
+                //         throw new Error("Failed to initialize upload.");
+                //     initData = await initResponse.json();
+                // } catch (error) {
+                //     console.error("Initialization cancel check:", error);
+                //     return;
+                // }
+                // const { urls, chunk_keys, file_id } = initData;
+                // console.log("Uploading separate chunks to r2.");
+                // const uploadPromises = chunkBlobs.map((blob, index) => {
+                //     const targetUrl = urls[index];
+
+                //     return fetch(targetUrl, {
+                //         method: "PUT",
+                //         body: blob,
+                //         headers: {
+                //             "Content-Type": "application/xml", // Absolute match required by R2 signature
+                //         },
+                //     }).then((res) => {
+                //         if (!res.ok)
+                //             throw new Error(
+                //                 `Failed to upload slice index: ${index}`,
+                //             );
+                //         console.log(
+                //             `[R2 Stream]: Fragment ${index + 1}/${totalChunks} successfully staged.`,
+                //         );
+                //         return res;
+                //     });
+                // });
+                // try {
+                //     // Wait until all fragments have successfully settled in your bucket storage
+                //     await Promise.all(uploadPromises);
+                //     console.log(
+                //         "[R2 Stream]: All Chunks uploaded successfully.",
+                //     );
+                // } catch (uploadError) {
+                //     console.error(
+                //         "Upload aborted due to upload failure:",
+                //         uploadError,
+                //     );
+                //     return;
+                // }
+
+                // console.log("Initializing background workers");
+                // try {
+                //     const completeResponse = await fetch(
+                //         "/api/upload/complete",
+                //         {
+                //             method: "POST",
+                //             headers: { "Content-Type": "application/json" },
+                //             body: JSON.stringify({
+                //                 file_id: file_id,
+                //                 file_name: file.name,
+                //                 chunk_keys: chunk_keys, // Array of ["projects/raw/{file_id}/chunk_0.xml", ...]
+                //             }),
+                //         },
+                //     );
+
+                //     if (!completeResponse.ok)
+                //         throw new Error(
+                //             "Server failed to intialize background workers.",
+                //         );
+                //     const result = await completeResponse.json();
+                //     console.log(
+                //         "Background workers successfully deployed!",
+                //         result,
+                //     );
+
+                //     // Next phase step hook: Pass control to short-polling dashboard function
+                //     // startStatusPollingLoop(fileId);
+                // } catch (completionError) {
+                //     console.error(
+                //         "Pipeline initiation failed:",
+                //         completionError,
+                //     );
+                // }
+            };
+
+            function chunkAndTagFile(xmlText, targetChunkSizeKB = 40) {
+                const TARGET_CHUNK_SIZE = targetChunkSizeKB * 1024;
+                const headerEndIndex = xmlText.indexOf("<measure");
+                if (headerEndIndex === -1)
+                    throw new Error("Invalid MusicXML: No measures found.");
+
+                const xmlHeader = xmlText.substring(0, headerEndIndex);
+                const measureRegex = /<measure[\s\S]*?<\/measure>/g;
+                const allMeasures = xmlText.match(measureRegex);
+
+                console.log(`All measures: ${allMeasures.length}`);
+
+                if (!allMeasures)
+                    throw new Error(
+                        "Could not parse explicit measure objects.",
+                    );
+
+                const chunks = [];
+                let currentChunkMeasures = [];
+                let currentChunkSize = 0;
+
+                allMeasures.map((measure) => {
+                    currentChunkMeasures.push(measure);
+                    currentChunkSize += new Blob([measure]).size;
+
+                    if (currentChunkSize >= TARGET_CHUNK_SIZE) {
+                        console.log(
+                            `Current chunk size: ${currentChunkSize} bytes`,
+                        );
+                        chunks.push(
+                            compileChunk(xmlHeader, currentChunkMeasures),
+                        );
+                        currentChunkMeasures = [];
+                        currentChunkSize = 0;
+                    }
+
+                    //  console.log(`Chunk size: ${currentChunkSize} bytes`);
+                });
+                return chunks;
+            }
+
+            function compileChunk(header, measuresArray) {
+                const measuresContent = measuresArray.join("\n");
+                let closingTags = "";
+                if (header.includes("<part")) closingTags += "</part>\n";
+                if (header.includes("<score-partwise"))
+                    closingTags += "</score-partwise>\n";
+
+                const fullChunkString = `${header}\n${measuresContent}\n${closingTags}`;
+
+                const blob = new Blob([fullChunkString], {
+                    type: "application/xml",
+                });
+
+                //console.log("Compiled chunk", blob);
+                return blob;
+            }
+
+            function Upload() {
+                const [loading, setLoading] = useState(false);
+
+                return html`
+                    <div class="uploader-card">
+                        <form>
+                            <h1>Convert Sheet Music to Video</h1>
+                            <p>
+                                Upload your MusicXML file to begin parallel
+                                chunk rendering
+                            </p>
+                            <input
+                                onChange=${handleFileChange}
+                                type="file"
+                                accept=".musicxml, .xml"
+                            />
+
+                            <button
+                                disabled=${loading}
+                                onClick=${() => setLoading(true)}
+                            >
+                                ${loading ? "Loading..." : "Submit"}
+                            </button>
+                        </form>
+                    </div>
+                `;
+            }
+
+            function Donwload() {
+                return html`
+                    <div class="downloader-card">
+                        <h1>Download Video</h1>
+                        <p>View your file here.</p>
+                    </div>
+                `;
+            }
+
+            // Render your interface component straight into the DOM root node
+            render(
+                html`<div class="flex-container">
+                    <${Upload} /><${Donwload} />
+                </div>`,
+                document.getElementById("app"),
+            );
+        </script>
+    </body>
+</html>
