@@ -1,0 +1,6 @@
+music21
+midi2audio
+pretty_midi
+numpy
+opencv-python
+moviepy
